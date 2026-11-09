@@ -1280,6 +1280,14 @@ body.batch-mode #list-scroll.batch-marquee-active {
   left: 0;
   z-index: 2;
   color: white;
+}
+
+/* Only cards that actually show a preview need the frosted panel behind their labels.
+ * On a placeholder-only card the backdrop is a flat gradient, so blurring it changes
+ * nothing visually while still forcing the compositor to build a backdrop surface for
+ * every card in view (which is what makes scrolling and repainting the grid expensive). */
+.prompt-card.has-preview .card-header,
+.prompt-card.has-preview .card-footer {
   backdrop-filter: blur(7px);
 }
 
@@ -4269,4 +4277,65 @@ body.operation-busy {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Canvas-zoom rendering degradation.
+ *
+ * When this page runs inside the "Prompt Manager Browser" node, the ComfyUI
+ * canvas scales the whole iframe with `transform: scale()`, so every zoom step
+ * re-rasterises the page. The result grid is by far the most expensive part:
+ * each card carries a full-size preview image and two `backdrop-filter` panels,
+ * which is why zooming degrades as the library grows.
+ *
+ * `web/comfyui/dom_widget_zoom_guard.js` adds these classes to <html> for the
+ * duration of a zoom gesture. Layout, text, scroll position and hit targets stay
+ * untouched - only the expensive paint is dropped:
+ *   .pm4a-canvas-zooming      cheap paint, every piece of information still shown
+ *   .pm4a-canvas-zooming-hard additionally blanks the result region while the
+ *                             sidebar, toolbar and search stay readable
+ * Neither class is ever set when the page is used standalone.
+ * ------------------------------------------------------------------------- */
+html.pm4a-canvas-zooming .app-header,
+html.pm4a-canvas-zooming .sidebar,
+html.pm4a-canvas-zooming .content-toolbar,
+html.pm4a-canvas-zooming .card-header,
+html.pm4a-canvas-zooming .card-footer {
+  backdrop-filter: none;
+}
+
+html.pm4a-canvas-zooming .card-header {
+  background: rgba(9, 11, 13, 0.9);
+}
+
+html.pm4a-canvas-zooming .prompt-card {
+  box-shadow: none;
+  transition: none;
+}
+
+html.pm4a-canvas-zooming .card-preview {
+  background: #1a1e23;
+}
+
+html.pm4a-canvas-zooming .card-preview img,
+html.pm4a-canvas-zooming .prompt-list img {
+  visibility: hidden;
+}
+
+/* The reveal governor hands the previews back a few per frame after a zoom gesture
+ * (web/browser/preview_paint_governor.js); this class keeps the rest hidden so the
+ * browser never decodes a whole screen of images in a single frame. */
+.pm4a-reveal-pending {
+  visibility: hidden;
+}
+
+html.pm4a-canvas-zooming .card-folder-label,
+html.pm4a-canvas-zooming .prompt-card-title,
+html.pm4a-canvas-zooming .prompt-title {
+  text-shadow: none;
+}
+
+/* Last resort while a zoom gesture keeps missing the frame budget. */
+html.pm4a-canvas-zooming-hard #list-scroll {
+  visibility: hidden;
 }

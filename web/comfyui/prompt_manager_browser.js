@@ -1,6 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { configureComfyI18n, getComfyLocale } from "./i18n.js";
 import { withSyncedDomWidth } from "./dom_widget_layout.js";
+import { guardDomWidgetDuringZoom } from "./dom_widget_zoom_guard.js";
 
 const NODE_CLASS = "Prompt Manager Browser (4A Prompt Manager)";
 const MANAGER_PATH = "/pm4a/wildcards";
@@ -68,6 +69,35 @@ function attachBrowser(node) {
     "background:#101214",
   ].join(";");
   frameHost.appendChild(iframe);
+
+  // The embedded library is a cross-document iframe whose cards each carry a preview image
+  // and two backdrop-filter panels. Because the frontend scales DOM widgets with
+  // `transform: scale()`, every canvas zoom step repaints that whole surface and stalls the
+  // canvas once the library grows. While zooming, switch only the iframe's *content* into a
+  // cheap rendering state (see the `pm4a-canvas-zooming` rules in web/browser/style.css):
+  // layout, sidebar, toolbar, search and every title stay visible, only the expensive paint
+  // (preview images, blur, shadows) is dropped until the gesture settles.
+  const zoomGuard = guardDomWidgetDuringZoom({
+    app,
+    targets: [{
+      element: iframe,
+      className: "pm4a-canvas-zooming",
+      hardClassName: "pm4a-canvas-zooming-hard",
+    }],
+  });
+  let zoomGuardAttempts = 0;
+  const ensureZoomGuard = () => {
+    if (zoomGuard.ensure() || zoomGuardAttempts >= 300) return;
+    zoomGuardAttempts += 1;
+    requestAnimationFrame(ensureZoomGuard);
+  };
+  ensureZoomGuard();
+
+  const originalOnRemoved = node.onRemoved;
+  node.onRemoved = function () {
+    zoomGuard.dispose();
+    return originalOnRemoved?.apply(this, arguments);
+  };
 
   let browserWidget = null;
   const availableHeight = () => {

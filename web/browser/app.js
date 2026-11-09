@@ -1,4 +1,5 @@
 import { readImagePromptDocument, stripLoraTags } from "./image_prompt_metadata.js";
+import { installPreviewPaintGovernor } from "./preview_paint_governor.js";
 import {
   autosizePromptTextarea,
   CHARACTER_PROMPT_MIN_HEIGHT,
@@ -84,6 +85,10 @@ import {
 
 setLocale(readBrowserLocale());
 applyDocumentTranslations();
+
+// Card previews are revealed a few per frame after a canvas zoom gesture instead of all at
+// once; see preview_paint_governor.js.
+const previewPaint = installPreviewPaintGovernor();
 
 const localeToggle = document.getElementById("locale-toggle");
 const localeToggleIcon = localeToggle?.querySelector(".locale-toggle-icon");
@@ -438,9 +443,15 @@ function keyQuery(key) {
   return `key=${encodeURIComponent(key)}`;
 }
 
-function previewImageUrl(key) {
+// Cards render their preview at ~160-220 CSS px. Requesting a matching thumbnail keeps the
+// per-image decode cheap, which is what makes the grid cheap to paint inside the ComfyUI
+// node (the whole iframe is repainted whenever the canvas is scaled or the node is moved).
+const CARD_THUMB_WIDTH = 384;
+
+function previewImageUrl(key, width = 0) {
   const revision = state.imageRevisions.get(key);
-  return `/pm4a/api/image?${keyQuery(key)}${revision ? `&v=${encodeURIComponent(revision)}` : ""}`;
+  const size = width > 0 ? `&w=${width}` : "";
+  return `/pm4a/api/image?${keyQuery(key)}${size}${revision ? `&v=${encodeURIComponent(revision)}` : ""}`;
 }
 
 function bumpImageRevision(key) {
@@ -3577,7 +3588,8 @@ function createCardPreviewImage(item, card) {
   image.loading = "lazy";
   image.decoding = "async";
   image.alt = t("{name}预览图", { name: item.name });
-  image.src = previewImageUrl(item.key);
+  image.src = previewImageUrl(item.key, CARD_THUMB_WIDTH);
+  previewPaint.track(image);
   image.addEventListener("error", () => {
     image.remove();
     card.classList.remove("has-preview");
@@ -3600,7 +3612,7 @@ function refreshVisibleCardImage(key) {
     preview.prepend(image);
   } else {
     image.alt = t("{name}预览图", { name: item.name });
-    image.src = previewImageUrl(key);
+    image.src = previewImageUrl(key, CARD_THUMB_WIDTH);
   }
   card.classList.add("has-preview");
   card.classList.remove("no-preview");

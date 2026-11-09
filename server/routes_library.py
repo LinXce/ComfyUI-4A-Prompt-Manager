@@ -15,6 +15,7 @@ try:
         scan_external_wildcards,
     )
     from ..services import prompt_library as wc
+    from ..services import image_thumbs
     from ..support.i18n import get_locale, tr
     from ..support.image_metadata import extract_image_metadata
 except ImportError:  # standalone preview
@@ -23,6 +24,7 @@ except ImportError:  # standalone preview
         scan_external_wildcards,
     )
     from services import prompt_library as wc  # type: ignore
+    from services import image_thumbs  # type: ignore
     from support.i18n import get_locale, tr  # type: ignore
     from support.image_metadata import extract_image_metadata  # type: ignore
 
@@ -678,6 +680,25 @@ async def handle_image(request: web.Request) -> web.Response:
     path = wc.get_image_path(key)
     if not path or not path.is_file():
         return _json_error("image not found", 404)
+
+    # `?w=<px>` asks for the cached card-grid thumbnail. Cards render the preview at a few
+    # hundred CSS px, so serving the full bitmap only makes every repaint decode and scale
+    # the whole image; the thumbnail keeps the grid cheap to paint.
+    width = image_thumbs.clamp_width(request.rel_url.query.get("w"))
+    if width:
+        thumbnail = await asyncio.to_thread(
+            image_thumbs.ensure_thumbnail,
+            path,
+            width,
+            wc.get_loaded_root(),
+        )
+        if thumbnail:
+            thumb_path, media_type = thumbnail
+            return web.FileResponse(
+                thumb_path,
+                headers={"Content-Type": media_type, "Cache-Control": "no-cache"},
+            )
+
     ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
     return web.FileResponse(
         path,
